@@ -1631,6 +1631,13 @@ static void collide_robot_and_weapon(const vmobjptridx_t  robot, const vmobjptri
 		smega_rock_stuff();
 #endif
 
+    int jolly_strike = 0;
+
+    jolly_strike = !robot_is_companion(robptr) && (get_weapon_id(weapon) == weapon_id_type::CONCUSSION_ID);
+    if(jolly_strike){
+        powerup_basic_str(30, 30, 30, 0, "Jolly missile strike!");
+    }
+
 	/*
 	 * Check if persistent weapon already hit this object. If yes, abort.
 	 * If no, add this object to hitobj_list and do it's damage.
@@ -1764,7 +1771,11 @@ static void collide_robot_and_weapon(const vmobjptridx_t  robot, const vmobjptri
 			}
 		}
 #endif
-
+        //	Jolly Missile
+        if (jolly_strike)
+        {
+            robot->control_type=0;
+        }
 	}
 
 #if defined(DXX_BUILD_DESCENT_II)
