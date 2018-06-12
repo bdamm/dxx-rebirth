@@ -647,7 +647,7 @@ void create_player_appearance_effect(const object_base &player_obj)
 		effect_obj->orient = player_obj.orient;
 
 		if ( Vclip[VCLIP_PLAYER_APPEARANCE].sound_num > -1 )
-			digi_link_sound_to_object( Vclip[VCLIP_PLAYER_APPEARANCE].sound_num, effect_obj, 0, F1_0);
+			digi_link_sound_to_object(Vclip[VCLIP_PLAYER_APPEARANCE].sound_num, effect_obj, 0, F1_0, sound_stack::allow_stacking);
 	}
 }
 }
@@ -1366,7 +1366,7 @@ static void DoEndGame()
 #if defined(DXX_BUILD_DESCENT_II)
 		int played=MOVIE_NOT_PLAYED;	//default is not played
 
-		played = PlayMovie(ENDMOVIE ".tex", ENDMOVIE,MOVIE_REQUIRED);
+		played = PlayMovie(ENDMOVIE ".tex", ENDMOVIE ".mve",MOVIE_REQUIRED);
 		if (!played)
 #endif
 		{
@@ -1764,13 +1764,13 @@ struct intro_movie_t {
 };
 
 const array<intro_movie_t, 7> intro_movie{{
-	{ 1,"pla"},
-							{ 5,"plb"},
-							{ 9,"plc"},
-							{13,"pld"},
-							{17,"ple"},
-							{21,"plf"},
-							{24,"plg"}
+	{ 1, "PLA"},
+	{ 5, "PLB"},
+	{ 9, "PLC"},
+	{13, "PLD"},
+	{17, "PLE"},
+	{21, "PLF"},
+	{24, "PLG"}
 }};
 
 static void ShowLevelIntro(int level_num)

@@ -457,12 +457,12 @@ static void draw_copyright()
 {
 	gr_set_default_canvas();
 	auto &canvas = *grd_curcanv;
-	gr_set_curfont(canvas, GAME_FONT);
+	auto &game_font = *GAME_FONT;
 	gr_set_fontcolor(canvas, BM_XRGB(6, 6, 6), -1);
-	const auto &&line_spacing = LINE_SPACING(canvas);
-	gr_string(canvas, 0x8000, SHEIGHT - line_spacing, TXT_COPYRIGHT);
+	const auto &&line_spacing = LINE_SPACING(game_font, game_font);
+	gr_string(canvas, game_font, 0x8000, SHEIGHT - line_spacing, TXT_COPYRIGHT);
 	gr_set_fontcolor(canvas, BM_XRGB(25, 0, 0), -1);
-	gr_string(canvas, 0x8000, SHEIGHT - (line_spacing * 2), DESCENT_VERSION);
+	gr_string(canvas, game_font, 0x8000, SHEIGHT - (line_spacing * 2), DESCENT_VERSION);
 }
 
 namespace dsx {
@@ -819,7 +819,6 @@ int select_demo(void)
 
 static int do_difficulty_menu()
 {
-	int s;
 	array<newmenu_item, NDL> m{{
 		nm_item_menu(MENU_DIFFICULTY_TEXT(0)),
 		nm_item_menu(MENU_DIFFICULTY_TEXT(1)),
@@ -828,15 +827,17 @@ static int do_difficulty_menu()
 		nm_item_menu(MENU_DIFFICULTY_TEXT(4)),
 	}};
 
-	s = newmenu_do1( NULL, TXT_DIFFICULTY_LEVEL, m.size(), &m.front(), unused_newmenu_subfunction, unused_newmenu_userdata, Difficulty_level);
+	const unsigned s = newmenu_do1(nullptr, TXT_DIFFICULTY_LEVEL, m.size(), &m.front(), unused_newmenu_subfunction, unused_newmenu_userdata, Difficulty_level);
 
-	if (s > -1 )	{
-		if (s != Difficulty_level)
+	if (s <= Difficulty_4)
+	{
+		const auto d = static_cast<Difficulty_level_type>(s);
+		if (d != Difficulty_level)
 		{
-			PlayerCfg.DefaultDifficulty = s;
+			PlayerCfg.DefaultDifficulty = d;
 			write_player_file();
 		}
-		Difficulty_level = s;
+		Difficulty_level = d;
 		return 1;
 	}
 	return 0;
@@ -1090,9 +1091,14 @@ void change_res()
 		Game_screen_mode = new_mode;
 		if (Game_wind) // shortly activate Game_wind so it's canvas will align to new resolution. really minor glitch but whatever
 		{
-			d_event event;
-			WINDOW_SEND_EVENT(Game_wind, EVENT_WINDOW_ACTIVATED);
-			WINDOW_SEND_EVENT(Game_wind, EVENT_WINDOW_DEACTIVATED);
+			{
+				const d_event event{EVENT_WINDOW_ACTIVATED};
+				WINDOW_SEND_EVENT(Game_wind);
+			}
+			{
+				const d_event event{EVENT_WINDOW_DEACTIVATED};
+				WINDOW_SEND_EVENT(Game_wind);
+			}
 		}
 	}
 	game_init_render_buffers(SM_W(Game_screen_mode), SM_H(Game_screen_mode));
@@ -2429,9 +2435,9 @@ static window_event_result polygon_models_viewer_handler(window *, const d_event
 			{
 				auto &canvas = *grd_curcanv;
 				draw_model_picture(canvas, view_idx, ang);
-				gr_set_curfont(canvas, GAME_FONT);
 				gr_set_fontcolor(canvas, BM_XRGB(255, 255, 255), -1);
-				gr_printf(canvas, FSPACX(1), FSPACY(1), "ESC: leave\nSPACE/BACKSP: next/prev model (%i/%i)\nA/D: rotate y\nW/S: rotate x\nQ/E: rotate z\nR: reset orientation",view_idx,N_polygon_models-1);
+				auto &game_font = *GAME_FONT;
+				gr_printf(canvas, game_font, FSPACX(1), FSPACY(1), "ESC: leave\nSPACE/BACKSP: next/prev model (%i/%i)\nA/D: rotate y\nW/S: rotate x\nQ/E: rotate z\nR: reset orientation", view_idx, N_polygon_models - 1);
 			}
 			break;
 		case EVENT_WINDOW_CLOSE:
@@ -2510,9 +2516,9 @@ static window_event_result gamebitmaps_viewer_handler(window *, const d_event &e
 #else
 				gr_bitmap(canvas, (SWIDTH / 2) - (bm->bm_w / 2), (SHEIGHT / 2) - (bm->bm_h / 2), *bm);
 #endif
-				gr_set_curfont(canvas, GAME_FONT);
 				gr_set_fontcolor(canvas, BM_XRGB(255, 255, 255), -1);
-				gr_printf(canvas, FSPACX(1), FSPACY(1), "ESC: leave\nSPACE/BACKSP: next/prev bitmap (%i/%i)",view_idx,Num_bitmap_files-1);
+				auto &game_font = *GAME_FONT;
+				gr_printf(canvas, game_font, FSPACX(1), FSPACY(1), "ESC: leave\nSPACE/BACKSP: next/prev bitmap (%i/%i)", view_idx, Num_bitmap_files-1);
 			}
 			break;
 		case EVENT_WINDOW_CLOSE:

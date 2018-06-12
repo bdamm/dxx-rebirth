@@ -945,16 +945,54 @@ int main(int argc,char**argv){(void)argc;(void)argv;
 			# on the header working differently than the used header
 			# actually works.
 			return (1, "Header %s is parseable, but cannot compile the test program." % header)
-		successflags.setdefault('CXXFLAGS', []).append('-E')
+		CXXFLAGS = successflags.setdefault('CXXFLAGS', [])
+		CXXFLAGS.append('-E')
 		if Compile(context, text=include, main='', msg='whether preprocessor can parse header %s' % header, testflags=successflags):
-			# If this Compile succeeds, then the used header cannot be
-			# compiled at all.  The header may have a syntax error or
-			# have unmet dependencies.
+			# If this Compile succeeds, then the used header can be
+			# preprocessed, but cannot be compiled as C++ even with an
+			# empty test program.  The header likely has a C++ syntax
+			# error or assumes prerequisite headers will be included by
+			# the calling program.
 			return (2, "Header %s exists, but cannot compile an empty program." % header)
-		# Finally, if nothing at all succeeded, either the header is
-		# completely missing or it is so badly broken that the
-		# preprocessor refuses to run to completion.
-		return (3, "Header %s is missing or unusable." % header)
+		CXXFLAGS.extend(('-M', '-MG'))
+		# If the header exists and is accepted by the preprocessor, an
+		# earlier test would have returned and this Compile would not be
+		# reached.  Therefore, this Compile runs only if the header:
+		# - Is directly missing
+		# - Is indirectly missing (present, but includes a missing
+		#   header)
+		# - Is present, but rejected by the preprocessor (such as from
+		#   an active `#error`)
+		if Compile(context, text=include, main='', msg='whether preprocessor can locate header %s (and supporting headers)' % header, expect_failure=True, testflags=successflags):
+			# If this Compile succeeds, then the header does not exist,
+			# or exists and includes (possibly through layers of
+			# indirection) a header which does not exist.  Passing `-MG`
+			# makes non-existent headers legal, but still rejects
+			# headers with `#error` and similar constructs.
+			#
+			# `expect_failure=True` inverts it to a failure in the
+			# logged output and in the Python value returned from
+			# `Compile(...)`.
+			# - Compile success means that the header was not found,
+			#   which is not an error when `-MG` is passed, but was an
+			#   error in earlier tests.
+			# - Compile failure means that the header was found, but
+			#   unusable, which is an error even when `-MG` is passed.
+			#   This can happen if the header contains `#error`
+			#   directives that are not preprocessed out.
+			# Therefore, use `expect_failure=True` so that "success"
+			# (header not found) prints "no" ("cannot locate header")
+			# and "failure" (header found, but unusable) prints "yes"
+			# ("can locate header").  This keeps the confusing double
+			# negatives confined to the code and this comment.  User
+			# visible log messages are clear.
+			#
+			# Compile failure (unusable) is converted to a True return
+			# by `expect_failure=True`, so the guarded path should
+			# return "unusable" and the fallthrough path should return
+			# "missing".
+			return (3, "Header %s is unusable." % header)
+		return (4, "Header %s is missing or includes a missing supporting header." % header)
 	# Compile and link a program that uses a system library.  On
 	# success, return None.  On failure, abort the SConf run.
 	def _check_system_library(self,*args,**kwargs):
@@ -2176,7 +2214,7 @@ I a()
 	@_implicit_test
 	def check_cxx11_variadic_forward_constructor(self,context,text,_macro_value=_quote_macro_value('''
     template <typename... Args>
-        D(Args&&... args) :
+        constexpr D(Args&&... args) :
             B,##__VA_ARGS__(std::forward<Args>(args)...) {}
 '''),**kwargs):
 		"""
@@ -2649,14 +2687,19 @@ class cached_property(object):
 		return r
 
 class LazyObjectConstructor(object):
-	def __get_wrapped_object(s,self,env,StaticObject):
-		wrapper = s.get('transform_object', None)
+	key_transform_env = object()
+	key_transform_object = object()
+	key_transform_target = object()
+	def __get_wrapped_object(s,self,env,StaticObject,__transform_object=key_transform_object):
+		wrapper = s.get(__transform_object, None)
 		if wrapper is None:
 			return StaticObject
 		return wrapper(self, env, StaticObject)
 	def __lazy_objects(self,source,
 			cache={},
 			__get_wrapped_object=__get_wrapped_object,
+			__transform_env=key_transform_env,
+			__transform_target=key_transform_target,
 			__strip_extension=lambda _, name, _splitext=os.path.splitext: _splitext(name)[0]
 		):
 		env = self.env
@@ -2689,8 +2732,8 @@ class LazyObjectConstructor(object):
 					((__strip_extension, None, StaticObject, (s,)),)	\
 					if isinstance(s, str) \
 					else ((	\
-						s.get('transform_target', __strip_extension),	\
-						s.get('transform_env', None),	\
+						s.get(__transform_target, __strip_extension),	\
+						s.get(__transform_env, None),	\
 						__get_wrapped_object(s, self, env, StaticObject),	\
 						s['source'],	\
 					),)	\
@@ -4255,14 +4298,14 @@ class DXXProgram(DXXCommon):
 'similar/arch/ogl/gr.cpp',
 'similar/arch/ogl/ogl.cpp',
 ),
-		'transform_target':_apply_target_name,
+		DXXCommon.key_transform_target:_apply_target_name,
 	},
 	))
 	get_objects_similar_arch_sdl = DXXCommon.create_lazy_object_getter(({
 		'source':(
 'similar/arch/sdl/gr.cpp',
 ),
-		'transform_target':_apply_target_name,
+		DXXCommon.key_transform_target:_apply_target_name,
 	},
 	))
 	get_objects_similar_arch_sdlmixer = DXXCommon.create_lazy_object_getter(({
@@ -4270,7 +4313,7 @@ class DXXProgram(DXXCommon):
 'similar/arch/sdl/digi_mixer.cpp',
 'similar/arch/sdl/jukebox.cpp',
 ),
-		'transform_target':_apply_target_name,
+		DXXCommon.key_transform_target:_apply_target_name,
 	},
 	))
 	__get_objects_common = DXXCommon.create_lazy_object_getter(({
@@ -4345,31 +4388,31 @@ class DXXProgram(DXXCommon):
 'similar/main/weapon.cpp',
 'similar/misc/args.cpp',
 ),
-		'transform_target':_apply_target_name,
+		DXXCommon.key_transform_target:_apply_target_name,
 	}, {
 		'source': (
 'similar/main/inferno.cpp',
 ),
-		'transform_env': lambda self, env: {'CPPDEFINES' : env['CPPDEFINES'] + env.__dxx_CPPDEFINE_SHAREPATH + env.__dxx_CPPDEFINE_git_version},
-		'transform_target':_apply_target_name,
+		DXXCommon.key_transform_env: lambda self, env: {'CPPDEFINES' : env['CPPDEFINES'] + env.__dxx_CPPDEFINE_SHAREPATH + env.__dxx_CPPDEFINE_git_version},
+		DXXCommon.key_transform_target:_apply_target_name,
 	}, {
 		'source': (
 'similar/main/kconfig.cpp',
 ),
-		'transform_object':WrapKConfigStaticObject,
-		'transform_target':_apply_target_name,
+		DXXCommon.key_transform_object:WrapKConfigStaticObject,
+		DXXCommon.key_transform_target:_apply_target_name,
 	}, {
 		'source': (
 'similar/misc/physfsx.cpp',
 ),
-		'transform_env': lambda self, env: {'CPPDEFINES' : env['CPPDEFINES'] + env.__dxx_CPPDEFINE_SHAREPATH},
-		'transform_target':_apply_target_name,
+		DXXCommon.key_transform_env: lambda self, env: {'CPPDEFINES' : env['CPPDEFINES'] + env.__dxx_CPPDEFINE_SHAREPATH},
+		DXXCommon.key_transform_target:_apply_target_name,
 	}, {
 		'source': (
 'similar/main/playsave.cpp',
 ),
-		'transform_env': _apply_env_version_seq,
-		'transform_target':_apply_target_name,
+		DXXCommon.key_transform_env: _apply_env_version_seq,
+		DXXCommon.key_transform_target:_apply_target_name,
 	},
 	))
 	get_objects_editor = DXXCommon.create_lazy_object_getter(({
@@ -4407,7 +4450,7 @@ class DXXProgram(DXXCommon):
 'similar/editor/texpage.cpp',
 'similar/editor/texture.cpp',
 ),
-		'transform_target':_apply_target_name,
+		DXXCommon.key_transform_target:_apply_target_name,
 	},
 	))
 
@@ -4465,8 +4508,8 @@ class DXXProgram(DXXCommon):
 		'source':(
 'similar/main/net_udp.cpp',
 ),
-		'transform_env': _apply_env_version_seq,
-		'transform_target':_apply_target_name,
+		DXXCommon.key_transform_env: _apply_env_version_seq,
+		DXXCommon.key_transform_target:_apply_target_name,
 	},
 	))
 		):
@@ -4508,7 +4551,10 @@ class DXXProgram(DXXCommon):
 		env = self.env
 		env.MergeFlags(archive.configure_added_environment_flags)
 		self.create_special_target_nodes(archive)
-		env.__dxx_CPPDEFINE_SHAREPATH = [('SHAREPATH', self._quote_cppdefine(self.user_settings.sharepath, f=str))]
+		sharepath = self.user_settings.sharepath
+		# Must use [] here, not (), since it is concatenated with other
+		# lists.
+		env.__dxx_CPPDEFINE_SHAREPATH = [('SHAREPATH', self._quote_cppdefine(sharepath, f=str))] if sharepath else []
 		env.Append(
 			CPPDEFINES = [
 				self.env_CPPDEFINES,
