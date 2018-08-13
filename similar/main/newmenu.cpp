@@ -1681,6 +1681,7 @@ struct listbox : embed_window_pointer_t
 	int allow_abort_flag;
 	listbox_subfunction_t<void> listbox_callback;
 	unsigned nitems;
+	unsigned items_on_screen;
 	int citem, first_item;
 	int box_w, height, box_x, box_y, title_height;
 	short swidth, sheight;
@@ -1691,6 +1692,11 @@ struct listbox : embed_window_pointer_t
 	marquee::ptr marquee;
 	void *userdata;
 };
+
+window *listbox_get_window(listbox *const lb)
+{
+	return lb->wind;
+}
 
 const char **listbox_get_items(listbox *lb)
 {
@@ -1731,20 +1737,26 @@ static void update_scroll_position(listbox *lb)
 	if (lb->citem< lb->first_item)
 		lb->first_item = lb->citem;
 
-	if (lb->citem>=( lb->first_item+LB_ITEMS_ON_SCREEN))
-		lb->first_item = lb->citem-LB_ITEMS_ON_SCREEN+1;
+	if (lb->citem >= lb->items_on_screen)
+	{
+		if (lb->first_item <= lb->citem - lb->items_on_screen)
+			lb->first_item = lb->citem - lb->items_on_screen + 1;
+	}
 
-	if (lb->nitems <= LB_ITEMS_ON_SCREEN )
+	if (lb->nitems <= lb->items_on_screen)
 		lb->first_item = 0;
 
-	if (lb->first_item>lb->nitems-LB_ITEMS_ON_SCREEN)
-		lb->first_item = lb->nitems-LB_ITEMS_ON_SCREEN;
+	if (lb->nitems >= lb->items_on_screen)
+	{
+		if (lb->first_item > lb->nitems - lb->items_on_screen)
+			lb->first_item = lb->nitems - lb->items_on_screen;
+	}
 	if (lb->first_item < 0 ) lb->first_item = 0;
 }
 
 static window_event_result listbox_mouse(window *, const d_event &event, listbox *lb, int button)
 {
-	int i, mx, my, mz, x1, x2, y1, y2;
+	int mx, my, mz, x1, x2, y1, y2;
 
 	switch (button)
 	{
@@ -1754,7 +1766,8 @@ static window_event_result listbox_mouse(window *, const d_event &event, listbox
 			{
 				mouse_get_pos(&mx, &my, &mz);
 				const auto &&line_spacing = LINE_SPACING(*grd_curcanv->cv_font, *GAME_FONT);
-				for (i=lb->first_item; i<lb->first_item+LB_ITEMS_ON_SCREEN; i++ )	{
+				for (int i = lb->first_item; i < lb->first_item + lb->items_on_screen; ++i)
+				{
 					if (i >= lb->nitems)
 						break;
 					int h;
@@ -1850,11 +1863,11 @@ static window_event_result listbox_key_command(window *, const d_event &event, l
 			break;
 		case KEY_PAGEDOWN:
 		case KEY_PAD3:
-			lb->citem += LB_ITEMS_ON_SCREEN;
+			lb->citem += lb->items_on_screen;
 			break;
 		case KEY_PAGEUP:
 		case KEY_PAD9:
-			lb->citem -= LB_ITEMS_ON_SCREEN;
+			lb->citem -= lb->items_on_screen;
 			break;
 		case KEY_ESC:
 			if (lb->allow_abort_flag) {
@@ -1904,14 +1917,60 @@ static void listbox_create_structure( listbox *lb)
 
 	lb->box_w = 0;
 	const auto &&fspacx = FSPACX();
-	range_for (auto &i, unchecked_partial_range(lb->item, lb->nitems))
+	const auto &&fspacx10 = fspacx(10);
+	const unsigned max_box_width = SWIDTH - (BORDERX * 2);
+	unsigned marquee_maxchars = UINT_MAX;
+	range_for (const auto i, unchecked_partial_range(lb->item, lb->nitems))
 	{
 		int w;
 		gr_get_string_size(medium3_font, i, &w, nullptr, nullptr);
-		if ( w > lb->box_w )
-			lb->box_w = w + fspacx(10);
+		w += fspacx10;
+		if (w > max_box_width)
+		{
+			unsigned mmc = 1;
+			for (;; ++mmc)
+			{
+				int w2;
+				gr_get_string_size(medium3_font, i, &w2, nullptr, nullptr, mmc);
+				if (w2 > max_box_width - fspacx10 || mmc > 128)
+					break;
+			}
+			/* mmc is now the shortest initial subsequence that is wider
+			 * than max_box_width.
+			 *
+			 * Next, search for whether any internal subsequences of
+			 * lesser length are also too wide.  This can happen if all
+			 * the initial characters are narrow, then characters
+			 * outside the initial subsequence are wide.
+			 */
+			for (auto j = i;;)
+			{
+				int w2;
+				gr_get_string_size(medium3_font, j, &w2, nullptr, nullptr, mmc);
+				if (w2 > max_box_width - fspacx10)
+				{
+					/* This subsequence is too long.  Reduce the length
+					 * and retry.
+					 */
+					if (!--mmc)
+						break;
+				}
+				else
+				{
+					/* This subsequence fits.  Move to the next
+					 * character.
+					 */
+					if (!*++j)
+						break;
+				}
+			}
+			w = max_box_width;
+			if (marquee_maxchars > mmc)
+				marquee_maxchars = mmc;
+		}
+		if (lb->box_w < w)
+			lb->box_w = w;
 	}
-	lb->height = LINE_SPACING(medium3_font, *GAME_FONT) * LB_ITEMS_ON_SCREEN;
 
 	{
 		int w, h;
@@ -1922,20 +1981,24 @@ static void listbox_create_structure( listbox *lb)
 	}
 
 	// The box is bigger than we can fit on the screen since at least one string is too long. Check how many chars we can fit on the screen (at least only - MEDIUM*_FONT is variable font!) so we can make a marquee-like effect.
-	if (lb->box_w + (BORDERX*2) > SWIDTH)
+	if (marquee_maxchars != UINT_MAX)
 	{
-		int w;
-
-		const auto box_w = lb->box_w = SWIDTH - (BORDERX*2);
-		gr_get_string_size(medium3_font, "O", &w, nullptr, nullptr);
-		lb->marquee = listbox::marquee::allocate(box_w / w);
+		lb->box_w = max_box_width;
+		lb->marquee = listbox::marquee::allocate(marquee_maxchars);
 		lb->marquee->lasttime = timer_query();
 	}
 
+	const auto &&line_spacing = LINE_SPACING(medium3_font, *GAME_FONT);
+	const unsigned bordery2 = BORDERY * 2;
+	const auto items_on_screen = std::max<unsigned>(
+		std::min<unsigned>(((canvas.cv_bitmap.bm_h - bordery2 - lb->title_height) / line_spacing) - 2, lb->nitems),
+		LB_ITEMS_ON_SCREEN);
+	lb->items_on_screen = items_on_screen;
+	lb->height = line_spacing * items_on_screen;
 	lb->box_x = (canvas.cv_bitmap.bm_w - lb->box_w) / 2;
 	lb->box_y = (canvas.cv_bitmap.bm_h - (lb->height + lb->title_height)) / 2 + lb->title_height;
-	if ( lb->box_y < lb->title_height )
-		lb->box_y = lb->title_height;
+	if (lb->box_y < bordery2)
+		lb->box_y = bordery2;
 
 	if ( lb->citem < 0 ) lb->citem = 0;
 	if ( lb->citem >= lb->nitems ) lb->citem = 0;
@@ -1952,8 +2015,6 @@ static void listbox_create_structure( listbox *lb)
 
 static window_event_result listbox_draw(window *, listbox *lb)
 {
-	int i;
-
 	if (lb->swidth != SWIDTH || lb->sheight != SHEIGHT || lb->fntscalex != FNTScaleX || lb->fntscaley != FNTScaleY)
 		listbox_create_structure ( lb );
 
@@ -1964,7 +2025,8 @@ static window_event_result listbox_draw(window *, listbox *lb)
 	gr_string(canvas, medium3_font, 0x8000, lb->box_y - lb->title_height, lb->title);
 
 	const auto &&line_spacing = LINE_SPACING(medium3_font, *GAME_FONT);
-	for (i=lb->first_item; i<lb->first_item+LB_ITEMS_ON_SCREEN; i++ )	{
+	for (int i = lb->first_item; i < lb->first_item + lb->items_on_screen; ++i)
+	{
 		int y = (i - lb->first_item) * line_spacing + lb->box_y;
 		const auto &&fspacx = FSPACX();
 		const auto &&fspacy = FSPACY();

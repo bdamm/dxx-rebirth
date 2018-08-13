@@ -149,15 +149,15 @@ public:
 	preserve_player_object_info(const objnum_t &o) :
 		objnum(o)
 	{
-		const auto &&plr = vmobjptr(objnum);
-		plr_shields = plr->shields;
-		plr_info = plr->ctype.player_info;
+		auto &plr = *vcobjptr(objnum);
+		plr_shields = plr.shields;
+		plr_info = plr.ctype.player_info;
 	}
 	void restore() const
 	{
-		const auto &&plr = vmobjptr(objnum);
-		plr->shields = plr_shields;
-		plr->ctype.player_info = plr_info;
+		auto &plr = *vmobjptr(objnum);
+		plr.shields = plr_shields;
+		plr.ctype.player_info = plr_info;
 	}
 };
 
@@ -595,7 +595,7 @@ static void set_sound_sources(fvcsegptridx &vcsegptridx)
 			if ((tm=seg->sides[sidenum].tmap_num2) != 0)
 				if ((ec = TmapInfo[tm & 0x3fff].eclip_num) != eclip_none)
 #elif defined(DXX_BUILD_DESCENT_II)
-			auto wid = WALL_IS_DOORWAY(seg, sidenum);
+			const auto wid = WALL_IS_DOORWAY(GameBitmaps, Textures, vcwallptr, seg, seg, sidenum);
 			if (wid & WID_RENDER_FLAG)
 				if ((((tm = seg->sides[sidenum].tmap_num2) != 0) &&
 					 ((ec = TmapInfo[tm & 0x3fff].eclip_num) != eclip_none)) ||
@@ -641,13 +641,15 @@ void create_player_appearance_effect(const object_base &player_obj)
 		? vm_vec_scale_add(player_obj.pos, player_obj.orient.fvec, fixmul(player_obj.size, flash_dist))
 		: player_obj.pos;
 
-	const auto &&effect_obj = object_create_explosion(vmsegptridx(player_obj.segnum), pos, player_obj.size, VCLIP_PLAYER_APPEARANCE);
+	const auto &&seg = vmsegptridx(player_obj.segnum);
+	const auto &&effect_obj = object_create_explosion(seg, pos, player_obj.size, VCLIP_PLAYER_APPEARANCE);
 
 	if (effect_obj) {
 		effect_obj->orient = player_obj.orient;
 
-		if ( Vclip[VCLIP_PLAYER_APPEARANCE].sound_num > -1 )
-			digi_link_sound_to_object(Vclip[VCLIP_PLAYER_APPEARANCE].sound_num, effect_obj, 0, F1_0, sound_stack::allow_stacking);
+		const auto sound_num = Vclip[VCLIP_PLAYER_APPEARANCE].sound_num;
+		if (sound_num > -1)
+			digi_link_sound_to_pos(sound_num, seg, 0, effect_obj->pos, 0, F1_0);
 	}
 }
 }
@@ -1688,7 +1690,7 @@ window_event_result StartNewLevelSub(const int level_num, const int page_in_text
 	init_morphs();
 	init_all_matcens();
 	reset_palette_add();
-	init_stuck_objects();
+	LevelUniqueStuckObjectState.init_stuck_objects();
 #if defined(DXX_BUILD_DESCENT_II)
 	init_smega_detonates();
 	init_thief_for_level();
@@ -2048,9 +2050,6 @@ static void StartLevel(int random_flag)
 	{
 		disable_matcens(); // ... disable matcens and ...
 		clear_transient_objects(0); // ... clear all transient objects.
-#if defined(DXX_BUILD_DESCENT_II)
-		clear_stuck_objects(); // and stuck ones.
-#endif
 	}
 
 	ai_reset_all_paths();

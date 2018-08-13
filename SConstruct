@@ -829,16 +829,26 @@ help:assume C++ compiler works
 		# take an action determined by the value of forced.
 		if forced is None:
 			r = action('''
-%s
-%s
-%s
+{tools}
+{macros}
+{text}
 
-#undef main	/* avoid -Dmain=SDL_main from libSDL */
+{undef_SDL_main}
+
+{main}
+'''.format(
+	tools=self.__tool_versions,
+	macros=self.__defined_macros,
+	text=text,
+	undef_SDL_main='' if self.user_settings.sdl2 else '#undef main	/* avoid -Dmain=SDL_main from libSDL */',
+	main=('' if main is None else
+'''
 int main(int argc,char**argv){(void)argc;(void)argv;
 %s
 
 ;}
-''' % (self.__tool_versions, self.__defined_macros, text, main), ext)
+''' % main
+	)), ext)
 			# Some tests check that the compiler rejects an input.
 			# SConf considers the result a failure when the compiler
 			# rejects the input.  For tests that consider a rejection to
@@ -922,23 +932,25 @@ int main(int argc,char**argv){(void)argc;(void)argv;
 	# stage failed and providing a text error message to show to the
 	# user.  Some callers handle failure by retrying with other options.
 	# Others abort the SConf run.
-	def _soft_check_system_library(self,context,header,main,lib,text='',successflags={}):
-		include = '\n'.join(['#include <%s>' % h for h in header])
+	def _soft_check_system_library(self,context,header,main,lib,pretext='',text='',successflags={},testflags={}):
+		include = pretext + '\n'.join(['#include <%s>' % h for h in header])
 		header = header[-1]
 		# Test library.  On success, good.  On failure, test header to
 		# give the user more help.
-		if self.Link(context, text=include + text, main=main, msg='for usable library %s' % lib, successflags=successflags):
+		if self.Link(context, text=include + text, main=main, msg='for usable library %s' % lib, successflags=successflags, testflags=testflags):
 			return
 		# If linking failed, an error report is inevitable.  Probe
 		# progressively simpler configurations to help the user trace
 		# the problem.
+		successflags = successflags.copy()
+		successflags.update(testflags)
 		Compile = self.Compile
 		if Compile(context, text=include + text, main=main, msg='for usable header %s' % header, testflags=successflags):
 			# If this Compile succeeds, then the test program can be
 			# compiled, but it cannot be linked.  The required library
 			# may be missing or broken.
 			return (0, "Header %s is usable, but library %s is not usable." % (header, lib))
-		if Compile(context, text=include, main='', msg='whether compiler can parse header %s' % header, testflags=successflags):
+		if Compile(context, text=include, main=main and '', msg='whether compiler can parse header %s' % header, testflags=successflags):
 			# If this Compile succeeds, then the test program cannot be
 			# compiled, but the header can be used with an empty test
 			# program.  Either the test program is broken or it relies
@@ -947,7 +959,7 @@ int main(int argc,char**argv){(void)argc;(void)argv;
 			return (1, "Header %s is parseable, but cannot compile the test program." % header)
 		CXXFLAGS = successflags.setdefault('CXXFLAGS', [])
 		CXXFLAGS.append('-E')
-		if Compile(context, text=include, main='', msg='whether preprocessor can parse header %s' % header, testflags=successflags):
+		if Compile(context, text=include, main=main and '', msg='whether preprocessor can parse header %s' % header, testflags=successflags):
 			# If this Compile succeeds, then the used header can be
 			# preprocessed, but cannot be compiled as C++ even with an
 			# empty test program.  The header likely has a C++ syntax
@@ -963,7 +975,7 @@ int main(int argc,char**argv){(void)argc;(void)argv;
 		#   header)
 		# - Is present, but rejected by the preprocessor (such as from
 		#   an active `#error`)
-		if Compile(context, text=include, main='', msg='whether preprocessor can locate header %s (and supporting headers)' % header, expect_failure=True, testflags=successflags):
+		if Compile(context, text=include, main=main and '', msg='whether preprocessor can locate header %s (and supporting headers)' % header, expect_failure=True, testflags=successflags):
 			# If this Compile succeeds, then the header does not exist,
 			# or exists and includes (possibly through layers of
 			# indirection) a header which does not exist.  Passing `-MG`
@@ -1076,6 +1088,7 @@ int main(int argc,char**argv){(void)argc;(void)argv;
 		if use_tracker:
 			self.check_curl(context)
 			self.check_jsoncpp(context)
+
 	@_implicit_test
 	def check_libpng(self,context,
 		_header=(
@@ -1130,6 +1143,7 @@ struct d_screenshot
 '''):
 		successflags = self.pkgconfig.merge(context, self.msgprefix, self.user_settings, 'libpng', 'libpng', _guess_flags)
 		return self._soft_check_system_library(context, header=_header, main=_main, lib='png', text=_text, successflags=successflags)
+
 	@_custom_test
 	def _check_user_settings_screenshot(self,context):
 		user_settings = self.user_settings
@@ -1138,16 +1152,19 @@ struct d_screenshot
 			screenshot_format_type = screenshot_mode
 		elif screenshot_mode == 'legacy':
 			screenshot_format_type = 'tga' if user_settings.opengl else 'pcx'
+		elif screenshot_mode == 'none':
+			screenshot_format_type = 'screenshot support disabled'
 		else:
 			return
 		context.Result('%s: checking how to format screenshots...%s' % (self.msgprefix, screenshot_format_type))
 		Define = context.sconf.Define
 		Define('DXX_USE_SCREENSHOT_FORMAT_PNG', int(screenshot_mode == 'png'))
 		Define('DXX_USE_SCREENSHOT_FORMAT_LEGACY', int(screenshot_mode == 'legacy'))
+		Define('DXX_USE_SCREENSHOT', int(screenshot_mode != 'none'))
 		if screenshot_mode == 'png':
 			e = self.check_libpng(context)
 			if e:
-				raise SCons.Errors.StopError(e[1] + '  Set screenshot=legacy to remove screenshot libpng requirement.')
+				raise SCons.Errors.StopError(e[1] + '  Set screenshot=legacy to remove screenshot libpng requirement or set screenshot=none to remove screenshot support.')
 
 	# Require _WIN32_WINNT >= 0x0501 to enable getaddrinfo
 	# Require _WIN32_WINNT >= 0x0600 to enable some useful AI_* flags
@@ -1287,6 +1304,8 @@ static void terminate_handler()
 	def check_libSDL2(self,context,_guess_flags={
 			'LIBS' : ['SDL2'] if sys.platform != 'darwin' else [],
 		}):
+		if not self.user_settings.opengl:
+			raise SCons.Errors.StopError('Rebirth does not support SDL2 without OpenGL.  Set opengl=1 or sdl2=0.')
 		self._check_libSDL(context, '2', _guess_flags)
 	def _check_libSDL(self,context,sdl2,guess_flags):
 		user_settings = self.user_settings
@@ -1308,6 +1327,7 @@ static void terminate_handler()
 			('DXX_MAX_AXES_PER_JOYSTICK', user_settings.max_axes_per_joystick),
 			('DXX_MAX_BUTTONS_PER_JOYSTICK', user_settings.max_buttons_per_joystick),
 			('DXX_MAX_HATS_PER_JOYSTICK', user_settings.max_hats_per_joystick),
+			('DXX_USE_SDL_REDBOOK_AUDIO', int(not sdl2)),
 		))
 		context.Display('%s: checking whether to enable joystick support...%s\n' % (self.msgprefix, 'yes' if user_settings.max_joysticks else 'no'))
 		# SDL2 removed CD-rom support.
@@ -1321,12 +1341,15 @@ static void terminate_handler()
 		main = '''
 	SDL_RWops *ops = reinterpret_cast<SDL_RWops *>(argv);
 #if DXX_MAX_JOYSTICKS
+#ifdef SDL_JOYSTICK_DISABLED
+#error "Rebirth configured with joystick support enabled, but SDL{sdl2} configured with joystick support disabled.  Disable Rebirth joystick support or install an SDL{sdl2} with joystick support enabled."
+#endif
 #define DXX_SDL_INIT_JOYSTICK	SDL_INIT_JOYSTICK |
 #else
 #define DXX_SDL_INIT_JOYSTICK
 #endif
-	SDL_Init(DXX_SDL_INIT_JOYSTICK %s | SDL_INIT_VIDEO | SDL_INIT_AUDIO);
-%s
+	SDL_Init(DXX_SDL_INIT_JOYSTICK {init_cdrom} | SDL_INIT_VIDEO | SDL_INIT_AUDIO);
+{test_opengl}
 #if DXX_MAX_JOYSTICKS
 	auto n = SDL_NumJoysticks();
 	(void)n;
@@ -1335,15 +1358,13 @@ static void terminate_handler()
 	SDL_FreeRW(ops);
 	SDL_Quit();
 '''
-		e = self._soft_check_system_library(context,header=['SDL.h'],main=main
-				% (init_cdrom, test_opengl),
+		e = self._soft_check_system_library(context,header=['SDL.h'],main=main.format(init_cdrom=init_cdrom, sdl2=sdl2, test_opengl=test_opengl),
 			lib=('SDL{0} with OpenGL' if test_opengl else 'SDL{0}').format(sdl2), successflags=successflags
 		)
 		if not e:
 			return
 		if test_opengl:
-			e2 = self._soft_check_system_library(context,header=['SDL.h'],main=main
-					% (init_cdrom, ''),
+			e2 = self._soft_check_system_library(context,header=['SDL.h'],main=main.format(init_cdrom=init_cdrom, sdl2=sdl2, test_opengl=''),
 				lib='SDL without OpenGL', successflags=successflags
 			)
 			if not e2 and e[0] == 1:
@@ -2659,6 +2680,27 @@ where the cast is useless.
 			record(RecordedTest(mangle(opt), 'assume linker accepts %s' % opt))
 		assert cls.custom_tests[0].name == cls.check_cxx_works.__name__, cls.custom_tests[0].name
 		assert cls.custom_tests[-1].name == cls._restore_cxx_prefix.__name__, cls.custom_tests[-1].name
+
+	@_implicit_test
+	def check_boost_test(self,context):
+		self._check_system_library(context, header=('boost/test/unit_test.hpp',), pretext='''
+#define BOOST_TEST_DYN_LINK
+#define BOOST_TEST_MODULE Rebirth
+''', main=None, lib='Boost.Test', text='''
+BOOST_AUTO_TEST_CASE(f)
+{
+	BOOST_TEST(true);
+}
+''', testflags={'LIBS' : ['boost_unit_test_framework']})
+
+	@_custom_test
+	def _check_boost_test_required(self,context):
+		register_runtime_test_link_targets = self.user_settings.register_runtime_test_link_targets
+		context.Display('%s: checking whether to build runtime tests...' % self.msgprefix)
+		context.Result(register_runtime_test_link_targets)
+		if register_runtime_test_link_targets:
+			self.check_boost_test(context)
+
 	# This must be the last custom test.  It does not test the environment,
 	# but is responsible for reversing test-environment-specific changes made
 	# by check_cxx_works.
@@ -2842,7 +2884,7 @@ class PCHManager(object):
 			if syspch_object_node:
 				CXXFLAGS += ['-include', syspch_cpp_filename, '-Winvalid-pch']
 			self.required_pch_object_node = self.ownpch_object_node = ownpch_object_node = env.StaticObject(target='%s.gch' % ownpch_cpp_filename, source=self.ownpch_cpp_node, CXXCOM=env._dxx_cxxcom_no_ccache_prefix, CXXFLAGS=CXXFLAGS)
-			env.Depends(ownpch_object_node, File(os.path.join(self.user_settings.builddir, 'dxxsconf.h')))
+			env.Depends(ownpch_object_node, File(os.path.join(user_settings.builddir, 'dxxsconf.h')))
 			if syspch_object_node:
 				env.Depends(ownpch_object_node, syspch_object_node)
 		self.pch_CXXFLAGS = ['-include', ownpch_cpp_filename or syspch_cpp_filename, '-Winvalid-pch']
@@ -3282,6 +3324,14 @@ class DXXCommon(LazyObjectConstructor):
 	VERSION_MICRO = 100
 	DXX_VERSION_SEQ = ','.join([str(VERSION_MAJOR), str(VERSION_MINOR), str(VERSION_MICRO)])
 	pch_manager = None
+	runtime_test_boost_tests = None
+
+	class RuntimeTest(LazyObjectConstructor):
+		nodefaultlibs = True
+		def __init__(self,target,source):
+			self.target = target
+			self.source = LazyObjectConstructor.create_lazy_object_getter(source)
+
 	@cached_property
 	def program_message_prefix(self):
 		return '%s.%d' % (self.PROGRAM_NAME, self.program_instance)
@@ -3498,7 +3548,7 @@ class DXXCommon(LazyObjectConstructor):
 					('opengl', True, 'build with OpenGL support'),
 					('opengles', self.default_opengles, 'build with OpenGL ES support'),
 					('editor', False, 'include editor into build (!EXPERIMENTAL!)'),
-					('sdl2', False, 'use libSDL2+SDL2_mixer (!DEVELOPERS ONLY - KNOWN BROKEN!)'),
+					('sdl2', False, 'use libSDL2+SDL2_mixer (!EXPERIMENTAL!)'),
 					('sdlmixer', True, 'build with SDL_Mixer support for sound and music (includes external music support)'),
 					('ipv6', False, 'enable UDP/IPv6 for multiplayer'),
 					('use_udp', True, 'enable UDP support'),
@@ -3511,6 +3561,7 @@ class DXXCommon(LazyObjectConstructor):
 					('words_need_alignment', self.default_words_need_alignment, 'align words at load (needed for many non-x86 systems)'),
 					('register_compile_target', True, 'report compile targets to SCons core'),
 					('register_cpp_output_targets', None, None),
+					('register_runtime_test_link_targets', False, None),
 					('enable_build_failure_summary', True, 'print failed nodes and their commands'),
 					('wrap_PHYSFS_read', False, None),
 					('wrap_PHYSFS_write', False, None),
@@ -3559,7 +3610,7 @@ class DXXCommon(LazyObjectConstructor):
 				'arguments': (
 					('host_endian', None, 'endianness of host platform', {'allowed_values' : ('little', 'big')}),
 					('host_platform', sys.platform.rstrip('0123456789'), 'cross-compile to specified platform', {'allowed_values' : ('darwin', 'linux', 'openbsd', 'win32')}),
-					('screenshot', 'png', 'screenshot file format', {'allowed_values' : ('legacy', 'png')}),
+					('screenshot', 'png', 'screenshot file format', {'allowed_values' : ('none', 'legacy', 'png')}),
 				),
 			},
 			{
@@ -3609,7 +3660,8 @@ class DXXCommon(LazyObjectConstructor):
 					if stack:
 						for n in names:
 							add_variable(self._generic_variable(key='%s_stop' % n, help=None, default=None))
-		def read_variables(self,variables,d):
+		def read_variables(self,program,variables,d):
+			verbose_settings_init = os.getenv('DXX_SCONS_DEBUG_USER_SETTINGS')
 			for (namelist,cname,dvalue,stack) in self.known_variables:
 				value = None
 				found_value = False
@@ -3619,23 +3671,40 @@ class DXXCommon(LazyObjectConstructor):
 						found_value = True
 						if stack:
 							if callable(v):
+								if verbose_settings_init:
+									message(program, 'append to stackable %r from %r by call to %r(%r, %r, %r)' % (cname, n, v, dvalue, value, stack))
 								value = v(dvalue=dvalue, value=value, stack=stack)
 							else:
 								if value:
-									value = stack.join([value, v])
+									value = (value, v)
+									if verbose_settings_init:
+										message(program, 'append to stackable %r from %r by join of %r.join(%r, %r)' % (cname, n, stack, value))
+									value = stack.join(value)
 								else:
+									if verbose_settings_init:
+										message(program, 'assign to stackable %r from %r value %r' % (cname, n, v))
 									value = v
-							if d.get('%s_stop' % n, None):
+							stop = '%s_stop' % n
+							if d.get(stop, None):
+								if verbose_settings_init:
+									message(program, 'terminating search early due to presence of %s' % stop)
 								break
 							continue
+						if verbose_settings_init:
+							message(program, 'assign to non-stackable %r from %r value %r' % (cname, n, v))
 						value = v
 						break
 					except KeyError as e:
 						pass
 				if not found_value:
-					value = dvalue
-				if callable(value):
-					value = value()
+					if callable(dvalue):
+						value = dvalue()
+						if verbose_settings_init:
+							message(program, 'assign to %r by default value %r from call %r' % (cname, value, dvalue))
+					else:
+						value = dvalue
+						if verbose_settings_init:
+							message(program, 'assign to %r by default value %r from direct' % (cname, value))
 				setattr(self, cname, value)
 			if self.builddir != '' and self.builddir[-1:] != '/':
 				self.builddir += '/'
@@ -3873,6 +3942,8 @@ class DXXCommon(LazyObjectConstructor):
 			# create_header_targets() does not call the PCHManager
 			# StaticObject hook.
 			self.create_header_targets()
+		if user_settings.register_runtime_test_link_targets:
+			self._register_runtime_test_link_targets()
 		configure_pch_flags = archive.configure_pch_flags
 		if configure_pch_flags:
 			self.pch_manager = PCHManager(self.user_settings, self.env, self.srcdir, configure_pch_flags, archive.pch_manager)
@@ -4074,11 +4145,30 @@ class DXXCommon(LazyObjectConstructor):
 				LIBS = ['bcm_host'],
 			)
 
+	def _register_runtime_test_link_targets(self):
+		runtime_test_boost_tests = self.runtime_test_boost_tests
+		if not runtime_test_boost_tests:
+			return
+		env = self.env
+		user_settings = self.user_settings
+		builddir = env.Dir(user_settings.builddir).Dir(self.srcdir)
+		for test in runtime_test_boost_tests:
+			LIBS = [] if test.nodefaultlibs else env['LIBS'][:]
+			LIBS.append('boost_unit_test_framework')
+			env.Program(target=builddir.File(test.target), source=test.source(self), LIBS=LIBS)
+
 class DXXArchive(DXXCommon):
 	PROGRAM_NAME = 'DXX-Archive'
 	_argument_prefix_list = None
 	srcdir = 'common'
 	target = 'dxx-common'
+	RuntimeTest = DXXCommon.RuntimeTest
+	runtime_test_boost_tests = (
+		RuntimeTest('test-valptridx-range', (
+			'common/unittest/valptridx-range.cpp',
+			))
+			,)
+	del RuntimeTest
 
 	def get_objects_common(self,
 		__get_objects_common=DXXCommon.create_lazy_object_getter((
@@ -4534,7 +4624,7 @@ class DXXProgram(DXXCommon):
 
 	def init(self,substenv):
 		user_settings = self.user_settings
-		user_settings.read_variables(self.variables, substenv)
+		user_settings.read_variables(self, self.variables, substenv)
 		archive = DXXProgram.static_archive_construction.get(user_settings.builddir, None)
 		if archive is None:
 			DXXProgram.static_archive_construction[user_settings.builddir] = archive = DXXArchive(user_settings)
@@ -4748,10 +4838,24 @@ class D1XProgram(DXXProgram):
 		__get_dxx_objects_common=DXXProgram.get_objects_common, \
 		__get_dsx_objects_common=DXXCommon.create_lazy_object_getter(({
 		'source':(
-'d1x-rebirth/main/bmread.cpp',
 'd1x-rebirth/main/custom.cpp',
 'd1x-rebirth/main/snddecom.cpp',
 ),
+	},
+	{
+		'source':(
+			# In Descent 1, bmread.cpp is used for both the regular
+			# build and the editor build.
+			#
+			# In Descent 2, bmread.cpp is only used for the editor
+			# build.
+			#
+			# Handle that inconsistency by defining it in the
+			# per-program lookup (D1XProgram, D2XProgram), not in the
+			# shared program lookup (DXXProgram).
+'similar/main/bmread.cpp',
+),
+		DXXCommon.key_transform_target:DXXProgram._apply_target_name,
 	},
 	))
 		):
@@ -4805,8 +4909,12 @@ class D2XProgram(DXXProgram):
 		__get_dxx_objects_editor=DXXProgram.get_objects_editor, \
 		__get_dsx_objects_editor=DXXCommon.create_lazy_object_getter(({
 		'source':(
-'d2x-rebirth/main/bmread.cpp',
+			# See comment by D1XProgram reference to bmread.cpp for why
+			# this is here instead of in the usual handling for similar
+			# files.
+'similar/main/bmread.cpp',
 ),
+		DXXCommon.key_transform_target:DXXProgram._apply_target_name,
 		},
 		))):
 		value = list(__get_dxx_objects_editor(self))

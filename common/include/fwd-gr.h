@@ -19,6 +19,10 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #pragma once
 
+#include <SDL_version.h>
+#if SDL_MAJOR_VERSION == 2
+#include <SDL_video.h>
+#endif
 #include <cstdint>
 #include <memory>
 #include <utility>
@@ -105,13 +109,18 @@ typedef std::unique_ptr<grs_subcanvas> grs_subcanvas_ptr;
 class grs_main_bitmap;
 typedef std::unique_ptr<grs_main_bitmap> grs_bitmap_ptr;
 
+#if SDL_MAJOR_VERSION == 1
 uint_fast32_t gr_list_modes(array<screen_mode, 50> &modes);
+#elif SDL_MAJOR_VERSION == 2
+extern SDL_Window *g_pRebirthSDLMainWindow;
+#endif
 
 }
 
 #ifdef dsx
 namespace dsx {
 int gr_set_mode(screen_mode mode);
+void gr_set_mode_from_window_size();
 
 int gr_init();
 #if DXX_USE_OGL
@@ -282,6 +291,7 @@ void gr_printt(grs_canvas &, const grs_font &, int x, int y, const char *format,
 #define gr_uprintf(A1,A2,A3,A4,F,...)	dxx_call_printf_checked(gr_printfus,gr_ustring,(A1,A2,A3,A4),(F),##__VA_ARGS__)
 std::pair<const char *, unsigned> gr_get_string_wrap(const grs_font &, const char *s, unsigned limit);
 void gr_get_string_size(const grs_font &, const char *s, int *string_width, int *string_height, int *average_width);
+void gr_get_string_size(const grs_font &, const char *s, int *string_width, int *string_height, int *average_width, const unsigned max_chars_per_line);
 
 // From scale.c
 void scale_bitmap(const grs_bitmap &bp, const array<grs_point, 3> &vertbuf, int orientation, grs_bitmap &);

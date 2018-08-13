@@ -453,6 +453,7 @@ static int HandleDeathInput(const d_event &event)
 	return 0;
 }
 
+#if DXX_USE_SCREENSHOT
 static void save_pr_screenshot()
 {
 	gr_set_default_canvas();
@@ -469,6 +470,7 @@ static void save_clean_screenshot()
 	game_render_frame_mono(CGameArg.DbgNoDoubleBuffer);
 	save_screen_shot(0);
 }
+#endif
 
 static window_event_result HandleDemoKey(int key)
 {
@@ -527,6 +529,7 @@ static window_event_result HandleDemoKey(int key)
 			do_game_pause();
 			break;
 
+#if DXX_USE_SCREENSHOT
 #ifdef macintosh
 		case KEY_COMMAND + KEY_SHIFTED + KEY_3:
 #endif
@@ -546,6 +549,7 @@ static window_event_result HandleDemoKey(int key)
 			}
 			break;
 		}
+#endif
 #ifndef NDEBUG
 		case KEY_DEBUGGED + KEY_I:
 			Newdemo_do_interpolate = !Newdemo_do_interpolate;
@@ -705,6 +709,7 @@ static window_event_result HandleSystemKey(int key)
 			do_game_pause();	break;
 
 
+#if DXX_USE_SCREENSHOT
 #ifdef macintosh
 		case KEY_COMMAND + KEY_SHIFTED + KEY_3:
 #endif
@@ -720,6 +725,7 @@ static window_event_result HandleSystemKey(int key)
 			}
 			break;
 		}
+#endif
 
 		KEY_MAC(case KEY_COMMAND+KEY_1:)
 		case KEY_F1:				if (Game_mode & GM_MULTI) show_netgame_help(); else show_help();	break;
@@ -854,11 +860,13 @@ static window_event_result HandleSystemKey(int key)
 			 */
 		case KEY_ALTED + KEY_SHIFTED + KEY_F9:
 		KEY_MAC(case KEY_COMMAND+KEY_E:)
+#if DXX_USE_SDL_REDBOOK_AUDIO
 			if (GameCfg.MusicType == MUSIC_TYPE_REDBOOK)
 			{
 				songs_stop_all();
 				RBAEjectDisk();
 			}
+#endif
 			break;
 
 		case KEY_ALTED + KEY_SHIFTED + KEY_F10:
@@ -1074,21 +1082,19 @@ static void kill_and_so_forth(fvmobjptridx &vmobjptridx, fvmsegptridx &vmsegptri
 		const auto &&t = vctrgptr(i);
 		if (trigger_is_exit(t))
 		{
-			range_for (const auto &&w, vcwallptr)
+			range_for (const auto &&wp, vcwallptr)
 			{
-				if (w->trigger == i)
+				auto &w = *wp;
+				if (w.trigger == i)
 				{
-					const auto &&segp = vmsegptridx(w->segnum);
+					const auto &&segp = vmsegptridx(w.segnum);
 					compute_segment_center(vcvertptr, ConsoleObject->pos, segp);
 					obj_relink(vmobjptr, vmsegptr, vmobjptridx(ConsoleObject), segp);
-					goto kasf_done;
+					return;
 				}
 			}
 		}
 	}
-
-kasf_done: ;
-
 }
 
 #ifndef RELEASE

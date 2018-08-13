@@ -86,9 +86,9 @@ static int     Search_mode=0;                      //if true, searching for segm
 static int Search_x,Search_y;
 static int	Automap_test=0;		//	Set to 1 to show wireframe in automap mode.
 
-static void draw_seg_objects(const vcsegptr_t seg)
+static void draw_seg_objects(grs_canvas &canvas, const unique_segment &seg)
 {
-	range_for (const auto obj, objects_in(*seg, vcobjptridx, vcsegptr))
+	range_for (const auto obj, objects_in(seg, vcobjptridx, vcsegptr))
 	{
 		auto sphere_point = g3_rotate_point(obj->pos);
 		const uint8_t color = (obj->type == OBJ_PLAYER && static_cast<icobjptridx_t::index_type>(obj) > 0)
@@ -97,7 +97,7 @@ static void draw_seg_objects(const vcsegptr_t seg)
 				? PLAYER_COLOR
 				: ROBOT_COLOR
 			);
-		g3_draw_sphere(*grd_curcanv, sphere_point, obj->size, color);
+		g3_draw_sphere(canvas, sphere_point, obj->size, color);
 	}
 }
 
@@ -384,7 +384,7 @@ static void add_edges(const vcsegptridx_t seg)
 
 		range_for (auto &&e, enumerate(seg->sides))
 		{
-			auto sidep = &e.value;
+			auto &sidep = e.value;
 			int	num_vertices;
 			const auto v = create_all_vertex_lists(seg, sidep, e.idx);
 			const auto &num_faces = v.first;
@@ -398,7 +398,7 @@ static void add_edges(const vcsegptridx_t seg)
 				int	en;
 
 				//Note: normal check appears to be the wrong way since the normals points in, but we're looking from the outside
-				if (g3_check_normal_facing(vcvertptr(seg->verts[vertex_list[fn*3]]),sidep->normals[fn]))
+				if (g3_check_normal_facing(vcvertptr(seg->verts[vertex_list[fn*3]]), sidep.normals[fn]))
 					flag = ET_NOTFACING;
 				else
 					flag = ET_FACING;
@@ -591,7 +591,7 @@ static void draw_mine_all(int automap_flag)
 				check_segment(segp);
 			else {
 				add_edges(segp);
-				draw_seg_objects(segp);
+				draw_seg_objects(*grd_curcanv, segp);
 			}
 		}
 	}
